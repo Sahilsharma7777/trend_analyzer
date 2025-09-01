@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dobby Trend Analyzer</title>
+  <style>
+    :root{
+      --bg: #ffffff;
+      --text: #0a0a0a;
+      --muted: #6b7280;
+      --border: #111111;     
+      --border-soft: #e5e7eb;
+      --accent: #111111;     
+      --accent-2: #fafafa;  
+      --success: #16a34a;
+      --warn: #f59e0b;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      color:var(--text); background: var(--bg);
+    }
+    body::before{
+      content:""; position:fixed; inset:0; z-index:-1;
+      background: url('background.png') center / cover no-repeat fixed;
+      opacity: .08; /* keep UI high-contrast on white */
+    }
+    .wrap{min-height:100%; display:flex; align-items:center; justify-content:center; padding:32px}
+
+    .card{
+      width:min(860px, 100%);
+      background: linear-gradient(180deg, #ffffff, #fefefe);
+      border:2px solid var(--border);
+      border-radius:24px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.08), inset 0 1px 0 rgba(255,255,255,.8);
+      overflow:hidden
+    }
+
+    .header{padding:36px 28px 12px; text-align:center}
+    .logo{width:62px; height:62px; margin:0 auto 12px auto; display:block; border-radius:14px; object-fit:cover}
+    h1{font-size:34px; line-height:1.15; margin:6px 0 0 0; font-weight:900; letter-spacing:-0.02em; color:#000}
+
+    .content{padding:22px 28px 28px; display:grid; gap:18px}
+
+    label{font-size:13px; color:var(--muted)}
+    input[type="password"], input[type="text"], textarea{
+      width:100%; padding:14px 16px; color:var(--text); background:#fff; border:1px solid var(--border-soft); border-radius:14px; outline:none; transition:.15s border-color, .15s box-shadow, .15s transform; font-size:15px; resize:vertical
+    }
+    textarea{min-height:120px; max-height:320px}
+    input:focus, textarea:focus{border-color:#111; box-shadow:0 0 0 3px rgba(0,0,0,.08); transform: translateY(-1px)}
+
+    .grid{display:grid; grid-template-columns:1fr; gap:14px}
+    @media(min-width:720px){ .grid{grid-template-columns:1.25fr .75fr} }
+
+    .row{display:flex; flex-wrap:wrap; gap:10px; align-items:center}
+
+    .btn{appearance:none; border:2px solid #000; background:var(--accent); color:#fff; padding:12px 18px; border-radius:12px; font-weight:800; font-size:14px; cursor:pointer; transition:.15s transform, .15s box-shadow}
+    .btn:hover{transform:translateY(-1px); box-shadow:0 8px 18px rgba(0,0,0,.15)}
+    .btn:disabled{opacity:.6; cursor:not-allowed; transform:none; box-shadow:none}
+    .btn.secondary{background:#fff; color:#000}
+
+    .switch{display:flex; align-items:center; gap:8px; user-select:none}
+    .status{font-size:12px; color:var(--muted)}
+
+    .output{background:#fff; border:1px solid var(--border-soft); border-radius:16px; padding:18px; white-space:pre-wrap; line-height:1.65; font-size:15px; max-height:480px; overflow:auto}
+    .muted{color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card" role="application" aria-label="Dobby Trend Analyzer App">
+      <div class="header">
+        <img src="logo.png" alt="Logo" class="logo" />
+        <h1>Dobby Trend Analyzer</h1>
+      </div>
+
+      <div class="content">
+        <div class="grid" id="apiRow">
+          <div>
+            <label for="apiKey">Dobby API Key</label>
+            <input id="apiKey" type="password" placeholder="fk-... (kept in your browser, never shared)" autocomplete="off" />
+            <div class="row" style="margin-top:8px">
+              <label class="switch"><input type="checkbox" id="rememberKey"/> Remember key in this browser</label>
+              <span class="status" id="apiStatus"></span>
+            </div>
+          </div>
+          <div class="row" style="align-self:end; justify-content:flex-end">
+            <button class="btn" id="saveKeyBtn">Use Key</button>
+            <button class="btn secondary" id="clearKeyBtn">Clear</button>
+          </div>
+        </div>
+
+        <div class="grid" id="promptRow" style="display:none">
+          <div>
+            <label for="userPrompt">Your Topic / Question</label>
+            <textarea id="userPrompt" placeholder="Type your question…"></textarea>
+          </div>
+          <div>
+            <label>Mode</label>
+            <div class="row">
+              <select id="depth" style="width:100%; padding:12px 14px; background:#fff; color:var(--text); border:1px solid var(--border-soft); border-radius:12px">
+                <option value="quick">Quick (concise)</option>
+                <option value="deep" selected>Deep (detailed)</option>
+              </select>
+            </div>
+            <div class="row" style="margin-top:10px; justify-content:flex-end">
+              <button class="btn" id="runBtn">Generate Analysis</button>
+              <button class="btn secondary" id="stopBtn" disabled>Stop</button>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label>Result</label>
+          <div class="output" id="output" aria-live="polite"><span class="muted">No output yet. Enter your key, add a question, and run.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  const API_ENDPOINT = "https://api.fireworks.ai/inference/v1/chat/completions";
+  const MODEL = "accounts/sentientfoundation/models/dobby-unhinged-llama-3-3-70b-new";
+
+  const apiKeyInput = document.getElementById('apiKey');
+  const rememberKey = document.getElementById('rememberKey');
+  const apiStatus = document.getElementById('apiStatus');
+  const saveKeyBtn = document.getElementById('saveKeyBtn');
+  const clearKeyBtn = document.getElementById('clearKeyBtn');
+  const promptRow = document.getElementById('promptRow');
+  const userPrompt = document.getElementById('userPrompt');
+  const depth = document.getElementById('depth');
+  const runBtn = document.getElementById('runBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const output = document.getElementById('output');
+
+  let apiKey = '';
+  let controller = null;
+
+  try {
+    const stored = localStorage.getItem('fireworks_api_key');
+    if(stored){ apiKeyInput.value = stored; rememberKey.checked = true; apiKey = stored; showPromptUI(true); apiStatus.textContent = 'Loaded from local storage.'; }
+  } catch(e) {}
+
+  function showPromptUI(ok){
+    promptRow.style.display = ok ? 'grid' : 'none';
+  }
+
+  saveKeyBtn.addEventListener('click', () => {
+    apiKey = apiKeyInput.value.trim();
+    if(!apiKey){ apiStatus.textContent = 'Please enter a valid key.'; apiStatus.style.color = 'var(--warn)'; return; }
+    apiStatus.textContent = 'Key active.'; apiStatus.style.color = 'var(--success)';
+    showPromptUI(true);
+    if(rememberKey.checked){ try{ localStorage.setItem('fireworks_api_key', apiKey); }catch(e){} }
+    else { try{ localStorage.removeItem('fireworks_api_key'); }catch(e){} }
+  });
+
+  clearKeyBtn.addEventListener('click', () => {
+    apiKeyInput.value = ''; apiKey = ''; apiStatus.textContent = 'Key cleared.'; apiStatus.style.color = 'var(--muted)'; showPromptUI(false);
+    try{ localStorage.removeItem('fireworks_api_key'); }catch(e){}
+  });
+
+  async function callDobby(prompt){
+    if(!apiKey){ setOutput('Please set your API key first.'); return; }
+
+    const style = depth.value === 'deep' ? 'deep' : 'quick';
+
+    const systemPrompt = `You are a razor-sharp Startup Trend Analyst. Write in clear, structured, non-fluffy prose. Use bullet points and mini-tables when useful. Always include: 1) Emerging Trends (why now), 2) Market Map, 3) Startup Opportunities with GTM, pricing & MVP, 4) Risks & Moats, 5) 30-60-90 day action plan for a solo/lean team. Keep it ${style}.`;
+
+    const body = {
+      model: MODEL,
+      max_tokens: 1800,
+      top_p: 1,
+      top_k: 40,
+      temperature: 0.6,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt }
+      ]
+    };
+
+    controller = new AbortController();
+    runBtn.disabled = true; stopBtn.disabled = false; setOutput('Thinking with Dobby-70B…');
+
+    try{
+      const res = await fetch(API_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
+
+      if(!res.ok){
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text}`);
+      }
+
+      const data = await res.json();
+      const content = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || JSON.stringify(data, null, 2);
+      setOutput(content);
+    } catch(err){
+      if(err.name === 'AbortError') setOutput('Request cancelled.');
+      else setOutput('Error: ' + err.message);
+    } finally {
+      runBtn.disabled = false; stopBtn.disabled = true; controller = null;
+    }
+  }
+
+  function setOutput(text){
+    output.textContent = text;
+  }
+
+  runBtn.addEventListener('click', () => {
+    const p = userPrompt.value.trim();
+    if(!p){ setOutput('Please enter a topic or question.'); return; }
+    callDobby(p);
+  });
+
+  stopBtn.addEventListener('click', () => {
+    if(controller) controller.abort();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if(e.key === 'Escape'){
+      if(controller) controller.abort();
+    } else if ((e.key === 'Enter' && (e.metaKey || e.ctrlKey))) {
+      if(!runBtn.disabled) runBtn.click();
+    }
+  });
+})();
+</script>
+</body>
+</html>
